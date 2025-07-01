@@ -1,1 +1,138 @@
+#part 1 
 
+#include <stdio.h> 
+#include <stdlib.h> 
+#include <pthread.h> 
+#include <unistd.h> 
+ 
+ 
+int X, N, M;  // Number of packets, user threads, kernel threads 
+int available_packets; 
+int next_user_turn = 1;  // Tracks which user thread should go next 
+int done = 0;  // Flags kernel threads to stop 
+ 
+pthread_mutex_t mutex = PTHREAD_MUTEX_INITIALIZER; 
+pthread_cond_t cv_user = PTHREAD_COND_INITIALIZER; 
+pthread_cond_t cv_kernel = PTHREAD_COND_INITIALIZER; 
+ 
+// User Thread 
+void *user_thread(void *arg) { 
+    int my_id = *(int *)arg; 
+    usleep(10000 + 10000 * ((my_id * 1000) % 5));  // Random delay 
+ 
+    pthread_mutex_lock(&mutex); 
+ 
+    // Wait until its this thread's turn and there are available packets 
+    while (!(my_id == next_user_turn && available_packets > 0)) { 
+        printf("No packet available or not my turn to produce, user level 
+thread %d going to sleep\n", my_id); 
+        fflush(stdout); 
+        pthread_cond_wait(&cv_user, &mutex); 
+    } 
+ 
+    // Puts data in a packet 
+    printf("User level thread %d is going to put data in a packet\n", 
+my_id); 
+    fflush(stdout); 
+    available_packets--; 
+ 
+    // Move to the next user thread in order 
+    next_user_turn++; 
+ 
+    pthread_cond_broadcast(&cv_kernel); // Wakes up kernel thread 
+    pthread_mutex_unlock(&mutex); 
+ 
+    return NULL; 
+} 
+ 
+// Kernel Thread 
+void *kernel_thread(void *arg) { 
+    int my_id = *(int *)arg; 
+    int served_count = 0;  // Count of served user threads 
+ 
+    while (1) { 
+        pthread_mutex_lock(&mutex); 
+ 
+        // If all user threads have finished, exit 
+        if (done) { 
+            pthread_mutex_unlock(&mutex); 
+            break; 
+        } 
+ 
+        // Wait until there are packets available 
+        while (available_packets == X) { 
+            printf("No data available, Going to sleep kernel thread %d\n", 
+my_id); 
+            fflush(stdout); 
+            pthread_cond_wait(&cv_kernel, &mutex); 
+ 
+            // Exits if signaled to terminate 
+            if (done) { 
+                pthread_mutex_unlock(&mutex); 
+                return NULL; 
+            } 
+        } 
+ 
+        // Serve the next user thread in order 
+        printf("user thread %d getting served\n", served_count + 1); 
+        fflush(stdout); 
+ 
+        available_packets++;  // Frees up packet 
+        served_count++; 
+ 
+        pthread_cond_broadcast(&cv_user); // Wakes up waiting user threads 
+        pthread_mutex_unlock(&mutex); 
+ 
+        usleep(10000 + 10000 * ((my_id * 1000) % 5));  // Random delay 
+    } 
+ 
+    return NULL; 
+} 
+ 
+int main(int argc, char *argv[]) { 
+    if (argc != 4) { 
+        fprintf(stderr, "Usage: %s <X> <N> <M>\n", argv[0]); 
+        return 1; 
+    } 
+ 
+    X = atoi(argv[1]); 
+    N = atoi(argv[2]); 
+    M = atoi(argv[3]); 
+ 
+    available_packets = X; 
+ 
+    pthread_t userThreads[N], kernelThreads[M]; 
+    int userIds[N], kernelIds[M]; 
+ 
+    // Create user level threads 
+    for (int i = 0; i < N; i++) { 
+        userIds[i] = i + 1; 
+        pthread_create(&userThreads[i], NULL, user_thread, &userIds[i]); 
+    } 
+ 
+    // Create kernel level threads 
+    for (int i = 0; i < M; i++) { 
+        kernelIds[i] = i + 1; 
+        pthread_create(&kernelThreads[i], NULL, kernel_thread, 
+&kernelIds[i]); 
+    } 
+ 
+    // Wait for user threads to finish 
+    for (int i = 0; i < N; i++) { 
+        pthread_join(userThreads[i], NULL); 
+    } 
+ 
+    // Signal kernel threads to stop 
+    pthread_mutex_lock(&mutex); 
+    done = 1; 
+    pthread_cond_broadcast(&cv_kernel); // Wakes up sleeping kernel 
+threads 
+    pthread_mutex_unlock(&mutex); 
+ 
+    // Wait for kernel threads to finish 
+    for (int i = 0; i < M; i++) { 
+        pthread_join(kernelThreads[i], NULL); 
+    } 
+ 
+    return 0; 
+} 
