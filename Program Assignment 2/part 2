@@ -1,0 +1,146 @@
+#include <stdio.h> 
+#include <stdlib.h> 
+#include <pthread.h> 
+#include <unistd.h> 
+ 
+#define TOTAL_PRODUCE 1000  // Number of items to produce/consume before 
+stopping 
+ 
+ 
+int *queue; 
+int queue_size; 
+int front = 0, rear = 0, count = 0; 
+int total_produced = 0, total_consumed = 0; 
+ 
+// Sleep counters 
+int producer_sleep_count[3] = {0}; 
+int consumer_sleep_count[2] = {0}; 
+ 
+// Mutex and condition variables 
+pthread_mutex_t mutex = PTHREAD_MUTEX_INITIALIZER; 
+pthread_cond_t cond_producer = PTHREAD_COND_INITIALIZER; 
+pthread_cond_t cond_consumer = PTHREAD_COND_INITIALIZER; 
+ 
+// Producer 
+void *producer(void *arg) { 
+    int my_id = *(int *)arg; 
+ 
+    while (1) { 
+        usleep(10000 + 10000 * (rand() % 5));  // Random delay 
+ 
+        pthread_mutex_lock(&mutex); 
+ 
+        // Stops when total produced reaches the limit 
+        if (total_produced >= TOTAL_PRODUCE) { 
+            pthread_mutex_unlock(&mutex); 
+            break; 
+        } 
+ 
+        // Waits to see if queue is full 
+        while (count == queue_size) { 
+            printf("Queue full! Producer %d going to sleep\n", my_id); 
+            fflush(stdout); 
+            producer_sleep_count[my_id]++; 
+            pthread_cond_wait(&cond_producer, &mutex); 
+        } 
+ 
+        // Produces an item 
+        queue[rear] = total_produced + 1; 
+        rear = (rear + 1) % queue_size; 
+        count++; 
+        total_produced++; 
+ 
+        printf("Producer %d produced item %d\n", my_id, total_produced); 
+        fflush(stdout); 
+ 
+        pthread_cond_signal(&cond_consumer); // Wakes up a consumer 
+        pthread_mutex_unlock(&mutex); 
+    } 
+ 
+    return NULL; 
+} 
+ 
+// Consumer 
+void *consumer(void *arg) { 
+    int my_id = *(int *)arg; 
+ 
+    while (1) { 
+        usleep(10000 + 10000 * (rand() % 5));  // Random delay 
+ 
+        pthread_mutex_lock(&mutex); 
+ 
+        // Stops when tje total consumed reaches the limit 
+        if (total_consumed >= TOTAL_PRODUCE) { 
+            pthread_mutex_unlock(&mutex); 
+            break; 
+        } 
+ 
+        // Wait to see if queue empty 
+        while (count == 0) { 
+            printf("Queue empty! Consumer %d going to sleep\n", my_id); 
+            fflush(stdout); 
+            consumer_sleep_count[my_id]++; 
+            pthread_cond_wait(&cond_consumer, &mutex); 
+        } 
+ 
+        // Consumes an item 
+        int item = queue[front]; 
+        front = (front + 1) % queue_size; 
+        count--; 
+        total_consumed++; 
+ 
+        printf("Consumer %d consumed item %d\n", my_id, item); 
+        fflush(stdout); 
+ 
+        pthread_cond_signal(&cond_producer); // Wakes up a producer 
+        pthread_mutex_unlock(&mutex); 
+    } 
+ 
+    return NULL; 
+} 
+ 
+int main(int argc, char *argv[]) { 
+    if (argc != 2) { 
+        fprintf(stderr, "Usage: %s <queue_size>\n", argv[0]); 
+        return 1; 
+    } 
+ 
+    queue_size = atoi(argv[1]); 
+    queue = (int *)malloc(queue_size * sizeof(int)); 
+ 
+    pthread_t producers[3], consumers[2]; 
+    int producer_ids[3] = {0, 1, 2}; 
+    int consumer_ids[2] = {0, 1}; 
+ 
+    // Creates producer threads 
+    for (int i = 0; i < 3; i++) { 
+        pthread_create(&producers[i], NULL, producer, &producer_ids[i]); 
+    } 
+ 
+    // Creates consumer threads 
+    for (int i = 0; i < 2; i++) { 
+        pthread_create(&consumers[i], NULL, consumer, &consumer_ids[i]); 
+    } 
+ 
+    // Waits for threads to finish 
+    for (int i = 0; i < 3; i++) { 
+        pthread_join(producers[i], NULL); 
+    } 
+    for (int i = 0; i < 2; i++) { 
+        pthread_join(consumers[i], NULL); 
+    } 
+ 
+    // Print sleep counts 
+    printf("\n=== Summary ===\n"); 
+    for (int i = 0; i < 3; i++) { 
+        printf("Producer %d slept %d times\n", i, 
+producer_sleep_count[i]); 
+    } 
+    for (int i = 0; i < 2; i++) { 
+        printf("Consumer %d slept %d times\n", i, 
+consumer_sleep_count[i]); 
+    } 
+ 
+    free(queue); 
+    return 0; 
+}
