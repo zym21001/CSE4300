@@ -624,4 +624,5 @@ defoption A3
 file    
 vm/uw-vmstats.c 
 defoption A4 
-defoption
+defoption A5
+
